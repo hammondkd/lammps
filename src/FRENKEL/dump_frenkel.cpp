@@ -43,7 +43,7 @@ DumpFrenkel::DumpFrenkel (LAMMPS *lmp, int narg, char **arg) : // {{{1
   if ( narg != 5 )
     error->all (FLERR,"Illegal dump frenkel command");
 
-  // Error if no atom tags are defined or there is no atom map
+  // Error if no atom tags are defined
   if ( not atom->tag_enable )
     error->all (FLERR, "Cannot use dump style frenkel unless atoms have IDs");
 

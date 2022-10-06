@@ -97,7 +97,7 @@ ComputeFrenkel::ComputeFrenkel (class LAMMPS* lmp, int narg, char** arg) :
 
   if ( lmp->citeme ) lmp->citeme->add(cite_compute_frenkel_c);
 
-  // Error if no atom tags are defined or there is no atom map
+  // Error if no atom tags are defined
   if ( not atom->tag_enable )
     error->all (FLERR, "Cannot use compute style frenkel unless atoms have IDs");
   // August 25, 2020: added "or domain->lattice-nbasis == 0" to this check
