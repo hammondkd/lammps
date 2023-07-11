@@ -107,7 +107,7 @@ class Compute : protected Pointers {
 
   Compute(class LAMMPS *, int, char **);
   ~Compute() override;
-  void modify_params(int, char **);
+  virtual void modify_params(int, char **);
   virtual void reset_extra_dof();
 
   virtual void init() = 0;

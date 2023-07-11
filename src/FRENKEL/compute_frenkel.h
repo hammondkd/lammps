@@ -52,6 +52,8 @@ class ComputeFrenkel : public Compute {
     void compute_local ();
     double memory_usage ();
 
+void write_lat_dump(); /* FIXME */
+
   private :
     friend class DumpFrenkel;
 

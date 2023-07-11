@@ -101,7 +101,7 @@ ComputeFrenkel::ComputeFrenkel (class LAMMPS* lmp, int narg, char** arg) :
   if ( not atom->tag_enable )
     error->all (FLERR, "Cannot use compute style frenkel unless atoms have IDs");
   // August 25, 2020: added "or domain->lattice-nbasis == 0" to this check
-  if ( not domain->lattice or domain->lattice->nbasis == 0 )
+  if ( not domain->lattice || domain->lattice->nbasis == 0 )
     error->all (FLERR,"Use of compute style frenkel with undefined lattice.");
 
   comm_reverse = 1;
@@ -301,6 +301,26 @@ void ComputeFrenkel::modify_params (int narg, char** arg) { // {{{1
 
 /****************************************************************************/
 
+/* TEMP */
+void ComputeFrenkel::write_lat_dump() {
+  fprintf(stderr,"TOO MANY ITERATIONS! on process %d; dumping coordinates to dump.last_SIGINT.*\n", comm->me);
+  char str[1024];
+  std::sprintf(str,"dump.last_SIGINT.%d", comm->me);
+  FILE* dumpfile = std::fopen(str, "w");
+  fprintf(dumpfile, "ITEM: TIMESTEP\n%d\n", update->ntimestep);
+  fprintf(dumpfile, "ITEM: NUMBER OF ATOMS\n%d\n", nlatsites+nlatghosts);
+  fprintf(dumpfile, "ITEM: BOX BOUNDS pp pp pp\n%G %G\n%G %G\n%G %G\n",
+    domain->boxlo[0], domain->boxhi[0],
+    domain->boxlo[1], domain->boxhi[1],
+    domain->boxlo[2], domain->boxhi[2]);
+  fprintf(dumpfile, "ITEM: ATOMS id type x y z clusterID\n");
+  for (int i = 0; i < nlatsites + nlatghosts; i++) {
+    fprintf(dumpfile, "%d %d %G %G %G %d\n", site_tag[i], noccupants[i],
+      latsites[i][0], latsites[i][1], latsites[i][2], clusterID[i]);
+  }
+}
+/* END TEMP */
+
 void ComputeFrenkel::init () { // {{{1
 
   // Note that invoked_vector and invoked_array are reset inside
@@ -425,7 +445,7 @@ void ComputeFrenkel::find_defects () { // {{{1
       // Apply periodic boundary conditions, if necessary
       domain->minimum_image (dx, dy, dz);
       drsq = dx*dx + dy*dy + dz*dz;
-      if ( drsq < drsq_min and drsq <= cutsq) {
+      if ( drsq < drsq_min && drsq <= cutsq) {
         drsq_min = drsq;
         closest_site = s;
       }
@@ -449,7 +469,7 @@ void ComputeFrenkel::find_defects () { // {{{1
           // Apply periodic boundary conditions, if necessary
           domain->minimum_image (dx, dy, dz);
           drsq = dx*dx + dy*dy + dz*dz;
-          if ( drsq < drsq_min and drsq <= cutsq) {
+          if ( drsq < drsq_min && drsq <= cutsq) {
             drsq_min = drsq;
             closest_site = s;
             break;
@@ -499,17 +519,17 @@ void ComputeFrenkel::find_clusters () { // {{{1
 
   // Exchange "ghost" sites with nearby processes
   // includes site tag, cluster ID, position, and number of occupants
-//  exchange_lattice_ghosts ();
+  exchange_lattice_ghosts ();
 
   // Start each defect off in its own cluster with cluster ID = site ID
-  for ( int k = 0; k < nlatsites; k++ ) {
+  for ( int k = 0; k < nlatsites + nlatghosts; k++ ) {
     if ( noccupants[k] == 1 )
       clusterID[k] = 0;  // "regular" sites
     else
       clusterID[k] = site_tag[k]; // interstitials, vacancies, and "irregulars"
   }
 
-  std::list<tagint>::iterator item, end;
+  //std::list<tagint>::iterator item, end;
 
   double dx, dy, dz, drsq;
   double cutvacsq = cut_vac * cut_vac;
@@ -519,32 +539,35 @@ void ComputeFrenkel::find_clusters () { // {{{1
   // until there are no changes on any process.
   int changes_made, global_changes_made, done;
   global_changes_made = false;
+int niter = 0;
   do {
+niter++;
     exchange_lattice_ghosts ();
+    construct_site_nlists ();
     changes_made = false;
     do {
       done = true;
       for ( int n = 0; n < nlatsites + nlatghosts ; n++ ) {
         if ( noccupants[n] == 1 ) continue; // Skip "normal" sites
         if ( nlist[n].empty() ) continue;
-        item = nlist[n].begin();
-        end = nlist[n].end();
-        while ( item != end ) {
-          int m = site_tag2index (*item);
-          if ( m != n and m >= 0 and
-              noccupants[m] != 1 and clusterID[m] != clusterID[n] ) {
+        for (int item : nlist[n]) {
+          int m = site_tag2index (item);
+          if ( m != n && m >= 0 &&
+              noccupants[m] != 1 && clusterID[m] != clusterID[n] ) {
             dx = latsites[n][0] - latsites[m][0];
             dy = latsites[n][1] - latsites[m][1];
             dz = latsites[n][2] - latsites[m][2];
             domain->minimum_image (dx, dy, dz);
             drsq = dx*dx + dy*dy + dz*dz;
-            if ( (noccupants[m] >= 2 and drsq <= cutintsq) or
-                 (noccupants[m] == 0 and drsq <= cutvacsq) ) {
+            if ( (noccupants[m] >= 2 && drsq <= cutintsq) ||
+                 (noccupants[m] == 0 && drsq <= cutvacsq) ) {
+if (comm->me == 0) fprintf(stderr, "BEFORE: changed cluster IDs %d and %d on process %d on time step %ld (IDs: %d, %d) (site tags: %d, %d); %d sites (%d ghosts) on this process; site m is at (%G,%G,%G); site n is at (%G,%G,%G)\n", m, n, comm->me, update->ntimestep, clusterID[m], clusterID[n], site_tag[m], site_tag[n], nlatsites, nlatghosts, latsites[m][0],latsites[m][1],latsites[m][2], latsites[n][0],latsites[n][1],latsites[n][2]);
               clusterID[n] = clusterID[m] = MIN(clusterID[n], clusterID[m]);
               done = false;
+if (comm->me == 0) fprintf(stderr, "AFTER : changed cluster IDs %d and %d on process %d on time step %ld (IDs: %d, %d) (site tags: %d, %d); item is %d\n", m, n, comm->me, update->ntimestep, clusterID[m], clusterID[n], site_tag[m], site_tag[n], item);
             }
           }
-          item++;
+          //item++;
         }
       }
       if ( not done ) changes_made = true;
@@ -554,6 +577,10 @@ void ComputeFrenkel::find_clusters () { // {{{1
     MPI_Allreduce (&changes_made, &global_changes_made, 1, MPI_INT,
       MPI_LOR, world);
 
+if (niter > 100) {
+  write_lat_dump();
+  std::exit(1);
+}
   } while ( global_changes_made );
 
   // Find the size of each cluster by counting the sites in each cluster;
@@ -589,7 +616,7 @@ void ComputeFrenkel::find_clusters () { // {{{1
     n = clusterID2occupied_index (clusterID[k]);
     if ( n < 0 ) {
       // should NEVER happen...
-      error->warning (FLERR, "Did not find cluster index");
+      error->warning (FLERR, "Did not find cluster index for cluster {} with id {}", k, clusterID[k]);
       continue;
     }
     if ( noccupants[k] == 0 ) // vacancy
@@ -894,11 +921,11 @@ void ComputeFrenkel::compute_array () { // {{{1
   // Add up # of -1's, -2's, etc. in the cluster size lists.
   for ( int n = 0; n < noccupied; n++ ) {
     if ( cluster_size[n] == 0 ) continue;
-    if ( cluster_size[n] > 0 and cluster_size[n] < size_array_cols )
+    if ( cluster_size[n] > 0 && cluster_size[n] < size_array_cols )
       array[1][cluster_size[n] - 1] += 1;
     else if ( cluster_size[n] >= size_array_cols )
       array[1][size_array_cols - 1] += 1;
-    else if ( cluster_size[n] < 0 and cluster_size[n] > -size_array_cols )
+    else if ( cluster_size[n] < 0 && cluster_size[n] > -size_array_cols )
       array[0][-cluster_size[n] - 1] += 1;
     else
       array[0][size_array_cols - 1] += 1;
@@ -1020,7 +1047,7 @@ void ComputeFrenkel::create_lattice_sites () { // {{{1
       if ( loc != nullptr ) loc[0] = 0;
       // Join line to the next one(s), if necessary
       loc = strrchr (line, '&');
-      if ( loc != nullptr and loc[1] == '\0' ) {
+      if ( loc != nullptr && loc[1] == '\0' ) {
         loc[0] = '\0';
         strcat (wholeline, line);
         continue;
@@ -1185,7 +1212,7 @@ void ComputeFrenkel::create_lattice_sites () { // {{{1
 int ComputeFrenkel::site_tag2index (tagint tag) { // {{{1
 
   int idx = static_cast<int> (tag - this->first_local_tag);
-  if ( idx >= 0 and idx < nlatsites )
+  if ( idx >= 0 && idx < nlatsites )
     return idx;
 
   // Tag belongs only to a ghost; find it!
@@ -1221,7 +1248,7 @@ void ComputeFrenkel::exchange_lattice_ghosts () { // {{{1
   int max_size = NINCR;
   int* idx;
 
-  nlatghosts = 0;
+  //nlatghosts = 0;
   n_send = new int[comm->nprocs];
   n_recv = new int[comm->nprocs];
   idx = new int[comm->nprocs];
@@ -1248,6 +1275,7 @@ void ComputeFrenkel::exchange_lattice_ghosts () { // {{{1
   // and which processes those boundaries correspond to.
   double dr[2][3];
   bool* already_sent = new bool[comm->nprocs];
+//fprintf(stderr, "CHECK #4: nlatsites is %d, nlatghosts is %d\n", nlatsites, nlatghosts);
   for ( int k = 0; k < nlatsites; k++ ) {
     dr[0][0] = latsites[k][0] - domain->sublo[0];
     dr[0][1] = latsites[k][1] - domain->sublo[1];
@@ -1265,36 +1293,36 @@ void ComputeFrenkel::exchange_lattice_ghosts () { // {{{1
     for ( int ix = -1; ix <= 1; ix++ ) {
       // If at the end of the domain, ignore those directions unless
       // box is periodic in that direction
-      if ( ix == -1 and comm->myloc[0] == 0 and not domain->xperiodic )
+      if ( ix == -1 && comm->myloc[0] == 0 && ! domain->xperiodic )
         continue;
-      if ( ix == 1 and comm->myloc[0] == comm->procgrid[0] - 1 and
-            not domain->xperiodic )
+      if ( ix == 1 && comm->myloc[0] == comm->procgrid[0] - 1 &&
+            ! domain->xperiodic )
         continue;
-      if ( ix == -1 and dr[0][0] > cutoff + SMALL ) continue;
-      if ( ix == 1 and dr[1][0] > cutoff + SMALL ) continue;
+      if ( ix == -1 && dr[0][0] > cutoff + SMALL ) continue;
+      if ( ix == 1 && dr[1][0] > cutoff + SMALL ) continue;
       for ( int iy = -1; iy <= 1; iy++ ) {
-        if ( iy == -1 and comm->myloc[1] == 0 and not domain->yperiodic )
+        if ( iy == -1 && comm->myloc[1] == 0 && ! domain->yperiodic )
           continue;
-        if ( iy == 1 and comm->myloc[1] == comm->procgrid[1] - 1 and
-            not domain->yperiodic )
+        if ( iy == 1 && comm->myloc[1] == comm->procgrid[1] - 1 &&
+            ! domain->yperiodic )
           continue;
-        if ( iy == -1 and dr[0][1] > cutoff + SMALL ) continue;
-        if ( iy == 1 and dr[1][1] > cutoff + SMALL ) continue;
+        if ( iy == -1 && dr[0][1] > cutoff + SMALL ) continue;
+        if ( iy == 1 && dr[1][1] > cutoff + SMALL ) continue;
         for ( int iz = -1; iz <= 1; iz++ ) {
-          if ( ix == 0 and iy == 0 and iz == 0 ) continue;
-          if ( iz == -1 and comm->myloc[2] == 0 and not domain->zperiodic )
+          if ( ix == 0 && iy == 0 && iz == 0 ) continue;
+          if ( iz == -1 && comm->myloc[2] == 0 && ! domain->zperiodic )
             continue;
-          if ( iz == 1 and comm->myloc[2] == comm->procgrid[2] - 1 and
-              not domain->zperiodic )
+          if ( iz == 1 && comm->myloc[2] == comm->procgrid[2] - 1 &&
+              ! domain->zperiodic )
             continue;
-          if ( iz == -1 and dr[0][2] > cutoff + SMALL ) continue;
-          if ( iz == 1 and dr[1][2] > cutoff + SMALL ) continue;
+          if ( iz == -1 && dr[0][2] > cutoff + SMALL ) continue;
+          if ( iz == 1 && dr[1][2] > cutoff + SMALL ) continue;
           // Should only get here when exchanging with an adjacent process
           int p = process_neighbor (ix, iy, iz);
           // Don't add site to process multiple times
           if ( already_sent[p] ) continue;
           n_send[p] += 1;
-          if ( n_send[p] > max_size ) { // Grow arrays if necessary
+          while ( n_send[p] > max_size ) { // Grow arrays if necessary
             this->reallocate_array (tag_send, comm->nprocs, max_size,
               comm->nprocs, max_size + NINCR);
             this->reallocate_array (x_send, comm->nprocs, max_size, 3,
@@ -1396,8 +1424,7 @@ void ComputeFrenkel::exchange_lattice_ghosts () { // {{{1
     if ( p == comm->me ) { // Don't talk to yourself, just copy
       for ( int i = 0; i < n_send[p]; i++ ) {
         tag_recv[p][i] = tag_send[p][i];
-        occup_recv[p][i] = occup_send[p][i]; // FIXME - which one should this be?
-        //occup_recv[p][i] += occup_send[p][i];
+        occup_recv[p][i] = occup_send[p][i];
         clusterID_recv[p][i] = clusterID_send[p][i];
         x_recv[p][i][0] = x_send[p][i][0];
         x_recv[p][i][1] = x_send[p][i][1];
@@ -1451,6 +1478,26 @@ void ComputeFrenkel::exchange_lattice_ghosts () { // {{{1
     MPI_Waitall (comm->nprocs, recv_request_c, recv_status_c);
   }
 
+/*
+// DEBUGGING!
+fprintf(stderr, "DEBUG: nlatghosts is %d on process %d\n", nlatghosts, comm->me);
+// look for sites that overlap
+if (clusterID) {
+  for (int i = 0; i < nlatsites; i++) {
+    if (noccupants[i] == 1) continue;
+    for (int p = 0; p < comm->nprocs; p++) {
+      for (int j = 0; j < n_recv[p]; j++) {
+        if (site_tag[i] == tag_recv[p][j] and clusterID[i] != clusterID_recv[p][j]) {
+//          fprintf(stderr, "DEBUG******: updating cluster if for tag %d on process %d from %d to %d (min of both)\n", site_tag[i], comm->me, clusterID[i], clusterID_recv[p][j]);
+          clusterID[i] = MIN(clusterID[i], clusterID_recv[p][j]);
+        }
+      }
+    }
+  }
+}
+// END DEBUGGING!
+*/
+
   // Reallocate the necessary memory
   nlatghosts = 0;
   for ( int p = 0; p < comm->nprocs; p++ )
@@ -1472,6 +1519,7 @@ void ComputeFrenkel::exchange_lattice_ghosts () { // {{{1
       latsites[kk][2] = x_recv[p][i][2];
       noccupants[kk] = occup_recv[p][i];
       if ( clusterID ) clusterID[kk] = clusterID_recv[p][i];
+//if (comm->me == 0 && clusterID && kk == 9375) fprintf(stderr,"DEBUG(1): cluster ID is %d for index %d (tag %d) from process %d\n", clusterID[kk], kk, site_tag[kk], p);
       kk++;
     }
   }
@@ -1548,9 +1596,7 @@ void ComputeFrenkel::construct_site_nlists () { // {{{1
     // Sort neighbor list and remove duplicates
     nlist[n].sort();
     nlist[n].unique();
-
   }
-
 }
 
 /****************************************************************************/
@@ -1618,19 +1664,19 @@ void ComputeFrenkel::find_closest_bin (double* r, int& i, int& j, int& k) {
   k = nint(z/binwidth);
 
   // Apply periodic boundaries, if appropriate
-  if ( domain->xperiodic and comm->procneigh[0][0] == comm->me )
+  if ( domain->xperiodic && comm->procneigh[0][0] == comm->me )
     i = (nlatbins[0] + i) % nlatbins[0];
   else {
     i = MIN(i, nlatbins[0]-1);
     i = MAX(i, 0);
   }
-  if ( domain->yperiodic and comm->procneigh[1][0] == comm->me )
+  if ( domain->yperiodic && comm->procneigh[1][0] == comm->me )
     j = (nlatbins[1] + j) % nlatbins[1];
   else {
     j = MIN(j, nlatbins[1]-1);
     j = MAX(j, 0);
   }
-  if ( domain->zperiodic and comm->procneigh[2][0] == comm->me )
+  if ( domain->zperiodic && comm->procneigh[2][0] == comm->me )
     k = (nlatbins[2] + k) % nlatbins[2];
   else {
     k = MIN(k, nlatbins[2]-1);
@@ -1645,37 +1691,37 @@ void ComputeFrenkel::find_closest_bin (double* r, int& i, int& j, int& k) {
 void ComputeFrenkel::bin_pbc (int& i, int& j, int& k) {
 
   if ( i < 0 ) {
-    if ( domain->xperiodic and comm->procneigh[0][0] == comm->me )
+    if ( domain->xperiodic && comm->procneigh[0][0] == comm->me )
       i = nlatbins[0] - 1;
     else
       i = 0;
   }
   else if ( i >= nlatbins[0] ) {
-    if ( domain->xperiodic and comm->procneigh[0][1] == comm->me )
+    if ( domain->xperiodic && comm->procneigh[0][1] == comm->me )
       i = 0;
     else
       i = nlatbins[0] - 1;
   }
   if ( j < 0 ) {
-    if ( domain->yperiodic and comm->procneigh[1][0] == comm->me )
+    if ( domain->yperiodic && comm->procneigh[1][0] == comm->me )
       j = nlatbins[1] - 1;
     else
       j = 0;
   }
   else if ( j >= nlatbins[1] ) {
-    if ( domain->yperiodic and comm->procneigh[1][1] == comm->me )
+    if ( domain->yperiodic && comm->procneigh[1][1] == comm->me )
       j = 0;
     else
       j = nlatbins[1] - 1;
   }
   if ( k < 0 ) {
-    if ( domain->zperiodic and comm->procneigh[2][0] == comm->me )
+    if ( domain->zperiodic && comm->procneigh[2][0] == comm->me )
       k = nlatbins[2] - 1;
     else
       k = 0;
   }
   else if ( k >= nlatbins[2] ) {
-    if ( domain->zperiodic and comm->procneigh[2][1] == comm->me )
+    if ( domain->zperiodic && comm->procneigh[2][1] == comm->me )
       k = 0;
     else
       k = nlatbins[2] - 1;
@@ -1709,7 +1755,7 @@ void ComputeFrenkel::construct_WS_cell () { // {{{1
       for ( int n2 = -1; n2 <= 1; n2++ )
         for ( int n3 = -1; n3 <= 1; n3++ ) {
           // Skip basis vector zero; that's the origin!
-          if ( j == 0 and n1 == 0 and n2 == 0 and n3 == 0 ) continue;
+          if ( j == 0 && n1 == 0 && n2 == 0 && n3 == 0 ) continue;
           // The normal vector is a vector passing through lattice point
           // zero (arbitrary) and another lattice point either in this unit
           // cell or in an adjacent one.  The factor of 0.5 means it is also
@@ -1779,7 +1825,7 @@ bool ComputeFrenkel::inside_WS_cell (int n, int k) { // {{{1
   double norm2sq, diff;
   for ( int i = 0; i < nnormal; i++ ) {
     // Skip zero-length normal vectors (this should never happen)
-    if ( fabs(normal[i][0]) < SMALL and fabs(normal[i][1]) < SMALL and
+    if ( fabs(normal[i][0]) < SMALL && fabs(normal[i][1]) < SMALL &&
          fabs(normal[i][2]) < SMALL )
       continue;
     norm2sq = normal[i][0]*normal[i][0] + normal[i][1]*normal[i][1]
@@ -1798,7 +1844,7 @@ bool ComputeFrenkel::inside_WS_cell (int n, int k) { // {{{1
 bool ComputeFrenkel::tag_is_already_in_occupancy_list // {{{1
         (tagint tag, int site) {
 
-  for ( int i = 0; (i < MAX_OCCUPANTS) and (occupant_tag[site][i] > 0); i++ )
+  for ( int i = 0; (i < MAX_OCCUPANTS) && (occupant_tag[site][i] > 0); i++ )
     if ( occupant_tag[site][i] == tag ) return true;
   return false;
 }
@@ -1809,7 +1855,7 @@ int ComputeFrenkel::next_free_occupant_tag_index (int s, int linenum) { // {{{1
 
   // Returns the index of the next available occupant tag for site s
   int i;
-  for ( i = 0; i < MAX_OCCUPANTS and occupant_tag[s][i] > 0; i++ )
+  for ( i = 0; i < MAX_OCCUPANTS && occupant_tag[s][i] > 0; i++ )
     ; // that is, just increment i until we reach the next available index
   if ( i >= MAX_OCCUPANTS )
     error->one (__FILE__, linenum, "Greater than " str(MAX_OCCUPANTS)
@@ -1856,7 +1902,7 @@ template <typename TYPE> void ComputeFrenkel::reallocate_array // {{{1
   memory->create (array, x2, y2, "ComputeFrenkel:reallocate2");
   for ( int i = 0; i < x2; i++ )
     for ( int j = 0; j < y2; j++ )
-      if ( i < x1 and j < y1 )
+      if ( i < x1 && j < y1 )
         array[i][j] = arr2[i][j];
       else
         array[i][j] = TYPE();
@@ -1877,7 +1923,7 @@ template <typename TYPE> void ComputeFrenkel::reallocate_array // {{{1
   for ( int i = 0; i < x2; i++ )
     for ( int j = 0; j < y2; j++ )
       for ( int k = 0; k < z2; k++ )
-        if ( i < x1 and j < y1 and k < z1 )
+        if ( i < x1 && j < y1 && k < z1 )
           array[i][j][k] = arr2[i][j][k];
         else
           array[i][j][k] = TYPE();
@@ -1892,7 +1938,7 @@ int ComputeFrenkel::process_neighbor (int x, int y, int z) { // {{{1
   // Returns the rank of the process with relative coordinates (x,y,z).
   // This process is (0,0,0).
   int rank = MPI_PROC_NULL;
-  if ( x == 0 and y == 0 and z == 0 )
+  if ( x == 0 && y == 0 && z == 0 )
     return comm->me;
 
   int a = comm->myloc[0], b = comm->myloc[1], c = comm->myloc[2];
@@ -1902,7 +1948,7 @@ int ComputeFrenkel::process_neighbor (int x, int y, int z) { // {{{1
     b = (b + comm->procgrid[1] + y) % comm->procgrid[1];
   if ( domain->zperiodic )
     c = (c + comm->procgrid[2] + z) % comm->procgrid[2];
-  if ( a < 0 or b < 0 or c < 0 ) {
+  if ( a < 0 || b < 0 || c < 0 ) {
     rank = MPI_PROC_NULL;
     error->warning (FLERR,
           "Domain is inconsistent (got MPI_PROC_NULL next door)");
