@@ -399,7 +399,7 @@ TEST_F(MoleculeFileTest, bonds)
     EXPECT_DOUBLE_EQ(mol->com[0], 1.0);
     EXPECT_DOUBLE_EQ(mol->com[1], 0.5);
     EXPECT_DOUBLE_EQ(mol->com[2], 0.5);
-    EXPECT_DOUBLE_EQ(mol->maxextent, sqrt(2));
+    EXPECT_DOUBLE_EQ(mol->maxextent, sqrt(2.0));
     EXPECT_EQ(mol->comatom, 1);
     END_HIDE_OUTPUT();
 }
@@ -408,9 +408,6 @@ int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
     ::testing::InitGoogleMock(&argc, argv);
-
-    if (platform::mpi_vendor() == "Open MPI" && !Info::has_exceptions())
-        std::cout << "Warning: using OpenMPI without exceptions. Death tests will be skipped\n";
 
     // handle arguments passed via environment variable
     if (const char *var = getenv("TEST_ARGS")) {

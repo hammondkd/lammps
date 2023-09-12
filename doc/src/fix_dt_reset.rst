@@ -1,4 +1,5 @@
 .. index:: fix dt/reset
+.. index:: fix dt/reset/kk
 
 fix dt/reset command
 ====================
@@ -8,7 +9,7 @@ Accelerator Variants: *dt/reset/kk*
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID dt/reset N Tmin Tmax Xmax keyword values ...
 

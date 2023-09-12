@@ -300,10 +300,6 @@ void FixSemiGrandCanonicalMC::post_force(int /*vflag*/)
  *********************************************************************/
 void FixSemiGrandCanonicalMC::doMC()
 {
-  /// Reset energy variable to signal the energy calculation routine that
-  /// it need to recompute the current total energy.
-  totalPotentialEnergy = 0;
-
   // Allocate array memory.
   changedAtoms.resize(atom->nmax);
 
@@ -410,7 +406,7 @@ void FixSemiGrandCanonicalMC::doMC()
         }
       }
 
-      if (kappa != 0.0 && serialMode == false) {
+      if (kappa != 0.0 && !serialMode) {
 
         // What follows is the second rejection test for the variance-constrained
         // semi-grandcanonical method.
@@ -456,9 +452,6 @@ void FixSemiGrandCanonicalMC::doMC()
         nRejectedSwapsLocal++;
       }
 
-      // Update variable that keeps track of the current total energy.
-      totalPotentialEnergy += deltaE;
-
       if (oversizeWindow) {
         // In case of an oversized sampling window we have to exchange the atom types and all other
         // per-atom quantities after each and every swap step. This is very slow and should only be used
@@ -479,7 +472,7 @@ void FixSemiGrandCanonicalMC::doMC()
 
   // For (parallelized) semi-grandcanonical MC we have to determine the current concentrations now.
   // For the serial version and variance-constrained MC it has already been done in the loop.
-  if (kappa == 0.0 && serialMode == false) {
+  if (kappa == 0.0 && !serialMode) {
     const int *type = atom->type;
     std::vector<int> localSpeciesCounts(atom->ntypes+1, 0);
     for (int i = 0; i < atom->nlocal; i++, ++type) {
@@ -666,8 +659,7 @@ bool FixSemiGrandCanonicalMC::placeSamplingWindow()
       // Is atom inside window region?
       if (x[0] >= samplingWindowLo[0] && x[0] < samplingWindowHi[0] &&
           x[1] >= samplingWindowLo[1] && x[1] < samplingWindowHi[1] &&
-          x[2] >= samplingWindowLo[2] && x[2] < samplingWindowHi[2])
-        {
+          x[2] >= samplingWindowLo[2] && x[2] < samplingWindowHi[2]) {
           // Atoms within a distance of two times the interaction radius from the cell border
           // are less often inside the sampling window than atoms in the center of the node cell,
           // which are always inside the window.

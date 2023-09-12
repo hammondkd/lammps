@@ -21,7 +21,6 @@
 #include "citeme.h"
 #include "comm.h"
 #include "domain.h"
-#include "electrode_accel_interface.h"
 #include "electrode_math.h"
 #include "electrode_matrix.h"
 #include "electrode_vector.h"
@@ -125,7 +124,7 @@ FixElectrodeConp::FixElectrodeConp(LAMMPS *lmp, int narg, char **arg) :
     if ((strcmp(arg[iarg], "couple") == 0)) {
       if (iarg + 3 > narg) error->all(FLERR, "Need two arguments after couple keyword");
       int id = group->find(arg[++iarg]);
-      if (id < 0) error->all(FLERR, "Group does not exist");
+      if (id < 0) error->all(FLERR, "Group {} does not exist", arg[iarg]);
       groups.push_back(id);
       group_bits.push_back(group->bitmask[id]);
       ++iarg;
@@ -141,7 +140,7 @@ FixElectrodeConp::FixElectrodeConp(LAMMPS *lmp, int narg, char **arg) :
         group_psi.push_back(utils::numeric(FLERR, arg[iarg], false, lmp));
       }
     } else if ((strcmp(arg[iarg], "algo") == 0)) {
-      if (!default_algo) error->one(FLERR, fmt::format("Algorithm can be set once, only"));
+      if (!default_algo) error->one(FLERR, "Algorithm can be set only once");
       default_algo = false;
       if (iarg + 2 > narg) error->all(FLERR, "Need one argument after algo command");
       char *algo_arg = arg[++iarg];
@@ -158,7 +157,7 @@ FixElectrodeConp::FixElectrodeConp(LAMMPS *lmp, int narg, char **arg) :
         matrix_algo = false;
         cg_algo = true;
       } else {
-        error->all(FLERR, "Invalid argument after algo keyword");
+        error->all(FLERR, "Unknown algo keyword {}", algo_arg);
       }
       if (cg_algo) {
         if (iarg + 2 > narg) error->all(FLERR, "Need one argument after algo *cg command");
@@ -176,7 +175,7 @@ FixElectrodeConp::FixElectrodeConp(LAMMPS *lmp, int narg, char **arg) :
         write_vec = true;
         output_file_vec = arg[++iarg];
       } else {
-        error->all(FLERR, "Illegal fix electrode/conp command with write");
+        error->all(FLERR, "Illegal fix {} command with write", style);
       }
     } else if ((strncmp(arg[iarg], "read", 4) == 0)) {
       if (iarg + 2 > narg) error->all(FLERR, "Need one argument after read command");
@@ -187,12 +186,12 @@ FixElectrodeConp::FixElectrodeConp(LAMMPS *lmp, int narg, char **arg) :
         read_mat = true;
         input_file_mat = arg[++iarg];
       } else {
-        error->all(FLERR, "Illegal fix electrode/conp command with read");
+        error->all(FLERR, "Illegal fix {} command with read", style);
       }
     } else if ((strcmp(arg[iarg], "temp") == 0)) {
       if (iarg + 4 > narg) error->all(FLERR, "Need three arguments after temp command");
-      if (strcmp(this->style, "electrode/thermo") != 0)
-        error->all(FLERR, "temp keyword not available for this electrode fix");
+      if (!utils::strmatch(style, "electrode/thermo"))
+        error->all(FLERR, "temp keyword not available for fix {}", style);
       thermo_temp = force->boltz / force->qe2f * utils::numeric(FLERR, arg[++iarg], false, lmp);
       thermo_time = utils::numeric(FLERR, arg[++iarg], false, lmp);
       thermo_init = utils::inumeric(FLERR, arg[++iarg], false, lmp);
@@ -204,7 +203,7 @@ FixElectrodeConp::FixElectrodeConp(LAMMPS *lmp, int narg, char **arg) :
     } else if ((strcmp(arg[iarg], "ffield") == 0)) {
       ffield = utils::logical(FLERR, arg[++iarg], false, lmp);
     } else {
-      error->all(FLERR, "Illegal fix electrode/conp command");
+      error->all(FLERR, "Unknown keyword {} for fix {} command", arg[iarg], style);
     }
     iarg++;
   }
@@ -242,9 +241,7 @@ FixElectrodeConp::FixElectrodeConp(LAMMPS *lmp, int narg, char **arg) :
   }
   if (read_inv && read_mat) error->all(FLERR, "Cannot read matrix from two files");
   if (write_mat && read_inv)
-    error->all(FLERR,
-               "Cannot write elastance matrix if reading capacitance matrix "
-               "from file");
+    error->all(FLERR, "Cannot write elastance matrix if reading capacitance matrix from file");
   num_of_groups = static_cast<int>(groups.size());
   size_vector = num_of_groups;
   array_flag = !!(algo == Algo::MATRIX_INV);
@@ -272,8 +269,6 @@ FixElectrodeConp::FixElectrodeConp(LAMMPS *lmp, int narg, char **arg) :
   groupbit = group->bitmask[igroup];
   ngroup = group->count(igroup);
 
-  accel_interface = std::unique_ptr<ElectrodeAccelInterface>(new ElectrodeAccelInterface(lmp));
-
   if (matrix_algo) {
     memory->create(iele_gathered, ngroup, "FixElectrode:iele_gathered");
     memory->create(buf_gathered, ngroup, "FixElectrode:buf_gathered");
@@ -294,7 +289,7 @@ FixElectrodeConp::FixElectrodeConp(LAMMPS *lmp, int narg, char **arg) :
 int FixElectrodeConp::modify_param(int narg, char **arg)
 {
   if (strcmp(arg[0], "tf") == 0) {
-    if (narg < 4) error->all(FLERR, fmt::format("Incorrect number of arguments for fix_modify tf"));
+    if (narg < 4) error->all(FLERR, "Incorrect number of arguments for fix_modify {}", style);
     tfflag = true;
     // read atom type, Thomas-Fermi length, and voronoi volume (reciprocal
     // number density)
@@ -326,13 +321,12 @@ int FixElectrodeConp::modify_param(int narg, char **arg)
     return 4;
 
   } else if (strcmp(arg[0], "timer") == 0) {
-    if (narg < 2)
-      error->all(FLERR, fmt::format("Incorrect number of arguments for fix_modify timer"));
+    if (narg < 2) error->all(FLERR, "Incorrect number of arguments for fix_modify {} timer", style);
     timer_flag = utils::logical(FLERR, arg[1], false, lmp);
     return 2;
 
   } else
-    error->all(FLERR, "Invalid argument for fix_modify electrode");
+    error->all(FLERR, "Unknown argument {} for fix_modify {}", arg[0], style);
   return 0;
 }
 
@@ -354,11 +348,11 @@ int FixElectrodeConp::modify_param(const std::string &param_str)
 int FixElectrodeConp::groupnum_from_name(char *groupname)
 {
   int id = group->find(groupname);
-  if (id < 0) error->all(FLERR, fmt::format("Group {} does not exist", groupname));
+  if (id < 0) error->all(FLERR, "Group {} does not exist", groupname);
   for (int g = 0; g < num_of_groups; g++) {
     if (groups[g] == id) return g;
   }
-  error->all(FLERR, fmt::format("Group {} is not coupled by fix electrode", groupname));
+  error->all(FLERR, "Group {} is not coupled by fix electrode", groupname);
   return -1;    // dummy return value
 }
 
@@ -381,7 +375,6 @@ void FixElectrodeConp::init()
   if (count > 1) error->all(FLERR, "More than one fix electrode");
 
   // check for package intel
-  accel_interface->intel_find_fix();
   if (etypes_neighlists)
     request_etypes_neighlists();
   else {
@@ -424,7 +417,7 @@ void FixElectrodeConp::post_constructor()
   input->variable->set(fmt::format("{} equal f_{}[{}]", var_vtop, fixname, 1 + top_group));
   input->variable->set(fmt::format("{} equal (v_{}-v_{})/lz", var_efield, var_vbot, var_vtop));
   // check for other efields and warn if found
-  if (modify->get_fix_by_style("efield").size() > 0 && comm->me == 0)
+  if (modify->get_fix_by_style("^efield").size() > 0 && comm->me == 0)
     error->warning(FLERR, "Other efield fixes found -- please make sure this is intended!");
   // call fix command:
   // fix [varstem]_efield all efield 0.0 0.0 [var_vdiff]/lz
@@ -449,7 +442,7 @@ void FixElectrodeConp::setup_post_neighbor()
     }
     MPI_Allreduce(MPI_IN_PLACE, &unset_tf, 1, MPI_INT, MPI_SUM, world);
     if (unset_tf)
-      error->all(FLERR, fmt::format("Thomas-Fermi parameters not set for all types in electrode"));
+      error->all(FLERR, "Thomas-Fermi parameters not set for all types in fix {}", style);
   }
 
   // get equal-style variable ids:
@@ -458,11 +451,9 @@ void FixElectrodeConp::setup_post_neighbor()
     if (group_psi_var_styles[g] == VarStyle::CONST) continue;
     const char *var_name = group_psi_var_names[g].c_str();
     int var_id = input->variable->find(var_name);
-    if (var_id < 0)
-      error->all(FLERR, fmt::format("Variable '{}' for fix electrode does not exist", var_name));
+    if (var_id < 0) error->all(FLERR, "Variable '{}' for fix {} does not exist", var_name, style);
     if (!input->variable->equalstyle(var_id))
-      error->all(FLERR,
-                 fmt::format("Variable '{}' for fix electrode is not equal-style", var_name));
+      error->all(FLERR, "Variable '{}' for fix {} is not equal-style", var_name, style);
     group_psi_var_ids[g] = var_id;
   }
 
@@ -497,6 +488,8 @@ void FixElectrodeConp::setup_post_neighbor()
     }
     MPI_Allreduce(MPI_IN_PLACE, &iele_to_group.front(), ngroup, MPI_INT, MPI_MAX, world);
 
+    memory->destroy(elastance);
+    memory->destroy(capacitance);
     memory->create(elastance, ngroup, ngroup, "fix_electrode:matrix");
     if (read_mat)
       read_from_file(input_file_mat, elastance, "elastance");
@@ -510,9 +503,8 @@ void FixElectrodeConp::setup_post_neighbor()
     if (comm->me == 0 && write_mat) {
       auto f_mat = fopen(output_file_mat.c_str(), "w");
       if (f_mat == nullptr)
-        error->one(FLERR,
-                   fmt::format("Cannot open elastance matrix file {}: {}", output_file_mat,
-                               utils::getsyserror()));
+        error->one(FLERR, "Cannot open elastance matrix file {}: {}", output_file_mat,
+                   utils::getsyserror());
       write_to_file(f_mat, taglist_bygroup, order_matrix(group_idx, elastance));
       fclose(f_mat);
     }
@@ -536,8 +528,7 @@ void FixElectrodeConp::setup_post_neighbor()
       compute_macro_matrices();
       MPI_Barrier(world);
       if (timer_flag && (comm->me == 0))
-        utils::logmesg(
-            lmp, fmt::format("SD-vector and macro matrices time: {:.4g} s\n", MPI_Wtime() - start));
+        utils::logmesg(lmp, "SD-vector and macro matrices time: {:.4g} s\n", MPI_Wtime() - start);
     }
   }
   // initial charges and b vector
@@ -552,11 +543,9 @@ void FixElectrodeConp::setup_post_neighbor()
     if (comm->me == 0) {
       auto f_vec = fopen(output_file_vec.c_str(), "w");
       if (f_vec == nullptr)
-        error->one(
-            FLERR,
-            fmt::format("Cannot open vector file {}: {}", output_file_vec, utils::getsyserror()));
+        error->one(FLERR, "Cannot open vector file {}: {}", output_file_vec, utils::getsyserror());
       std::vector<std::vector<double>> vec(ngroup, std::vector<double>(1));
-      for (int i = 0; i < ngroup; i++) { vec[group_idx[i]][0] = potential_iele[i]; }
+      for (int i = 0; i < ngroup; i++) vec[group_idx[i]][0] = potential_iele[i];
       write_to_file(f_vec, taglist_bygroup, vec);
       fclose(f_vec);
     }
@@ -566,9 +555,8 @@ void FixElectrodeConp::setup_post_neighbor()
     if (comm->me == 0) {
       auto f_inv = fopen(output_file_inv.c_str(), "w");
       if (f_inv == nullptr)
-        error->one(FLERR,
-                   fmt::format("Cannot open capacitance matrix file {}: {}", output_file_inv,
-                               utils::getsyserror()));
+        error->one(FLERR, "Cannot open capacitance matrix file {}: {}", output_file_inv,
+                   utils::getsyserror());
       write_to_file(f_inv, taglist_bygroup, order_matrix(group_idx, capacitance));
       fclose(f_inv);
     }
@@ -605,7 +593,7 @@ void FixElectrodeConp::invert()
   if (info_rf != 0 || info_ri != 0) error->all(FLERR, "CONP matrix inversion failed!");
   MPI_Barrier(world);
   if (timer_flag && (comm->me == 0))
-    utils::logmesg(lmp, fmt::format("Invert time: {:.4g} s\n", MPI_Wtime() - invert_time));
+    utils::logmesg(lmp, "Invert time: {:.4g} s\n", MPI_Wtime() - invert_time);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -645,6 +633,8 @@ void FixElectrodeConp::setup_pre_exchange()    // create_taglist
   int const nprocs = comm->nprocs;
   tagint *tag = atom->tag;
 
+  delete[] recvcounts;
+  delete[] displs;
   recvcounts = new int[nprocs];
   displs = new int[nprocs];
 
@@ -694,9 +684,9 @@ void FixElectrodeConp::setup_pre_exchange()    // create_taglist
   mem_needed /= (1024 * 1024 * 1024);    // convert to GiB
   if (mem_needed > 0.5 && comm->me == 0)
     error->warning(FLERR,
-                   fmt::format("Please ensure there is sufficient memory for fix electrode "
-                               "(anticipated usage is at least {:.1f} GiB per proc)",
-                               mem_needed));
+                   "Please ensure there is sufficient memory for fix electrode "
+                   "(anticipated usage is at least {:.1f} GiB per proc)",
+                   mem_needed);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -795,7 +785,6 @@ void FixElectrodeConp::update_charges()
   double *q = atom->q;
   gather_list_iele();
   pre_update();
-  accel_interface->intel_pack_buffers();    // update buffers for pppmintel to compute potential
   auto q_local = std::vector<double>(nlocalele, 0.);
   if (algo == Algo::MATRIX_INV) {
     std::fill(sb_charges.begin(), sb_charges.end(), 0.);
@@ -866,12 +855,11 @@ void FixElectrodeConp::update_charges()
   }
   set_charges(q_local);
   update_time += MPI_Wtime() - start;
-  accel_interface->intel_pack_buffers();
 }
 
-std::vector<double> FixElectrodeConp::ele_ele_interaction(const std::vector<double>& q_local)
+std::vector<double> FixElectrodeConp::ele_ele_interaction(const std::vector<double> &q_local)
 {
-  assert(q_local.size() == nlocalele);
+  assert((int) q_local.size() == nlocalele);
   assert(algo == Algo::CG || algo == Algo::MATRIX_CG);
   if (algo == Algo::CG) {
     set_charges(q_local);
@@ -885,11 +873,11 @@ std::vector<double> FixElectrodeConp::ele_ele_interaction(const std::vector<doub
 
 void FixElectrodeConp::set_charges(std::vector<double> q_local)
 {
-  assert(q_local.size() == nlocalele);
+  assert((int) q_local.size() == nlocalele);
   double *q = atom->q;
   for (int i = 0; i < nlocalele; i++) q[atom->map(taglist_local[i])] = q_local[i];
   comm->forward_comm(this);
-  accel_interface->intel_pack_buffers();
+  intel_pack_buffers();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -923,7 +911,7 @@ std::vector<double> FixElectrodeConp::gather_ngroup(std::vector<double> x_local)
 
 std::vector<double> FixElectrodeConp::constraint_correction(std::vector<double> x)
 {
-  return constraint_projection(x);
+  return constraint_projection(std::move(x));
 }
 
 /* ----------------------------------------------------------------------
@@ -954,7 +942,7 @@ std::vector<double> FixElectrodeConp::scale_vector(double alpha, std::vector<dou
 
 std::vector<double> FixElectrodeConp::add_nlocalele(std::vector<double> a, std::vector<double> b)
 {
-  assert(a.size() == nlocalele && b.size() == nlocalele);
+  assert(((int) a.size() == nlocalele) && ((int) b.size() == nlocalele));
   for (int i = 0; i < nlocalele; i++) a[i] += b[i];
   return a;
 }
@@ -963,7 +951,7 @@ std::vector<double> FixElectrodeConp::add_nlocalele(std::vector<double> a, std::
 
 double FixElectrodeConp::dot_nlocalele(std::vector<double> a, std::vector<double> b)
 {
-  assert(a.size() == nlocalele && b.size() == nlocalele);
+  assert(((int) a.size() == nlocalele) && ((int) b.size() == nlocalele));
   double out = 0.;
   for (int i = 0; i < nlocalele; i++) out += a[i] * b[i];
   MPI_Allreduce(MPI_IN_PLACE, &out, 1, MPI_DOUBLE, MPI_SUM, world);
@@ -974,7 +962,7 @@ double FixElectrodeConp::dot_nlocalele(std::vector<double> a, std::vector<double
 
 std::vector<double> FixElectrodeConp::times_elastance(std::vector<double> x)
 {
-  assert(x.size() == ngroup);
+  assert((int) x.size() == ngroup);
   auto out = std::vector<double>(nlocalele, 0.);
   for (int i = 0; i < nlocalele; i++) {
     double *_noalias row = elastance[list_iele[i]];
@@ -1213,21 +1201,20 @@ FixElectrodeConp::~FixElectrodeConp()
   if (comm->me == 0) {
     try {
       if (timer_flag) {
-        utils::logmesg(lmp, fmt::format("Multiplication time: {:.4g} s\n", mult_time));
-        utils::logmesg(lmp, fmt::format("Update time: {:.4g} s\n", update_time));
+        utils::logmesg(lmp, "Multiplication time: {:.4g} s\n", mult_time);
+        utils::logmesg(lmp, "Update time: {:.4g} s\n", update_time);
       }
       if (algo == Algo::CG || algo == Algo::MATRIX_CG)
-        utils::logmesg(
-            lmp,
-            fmt::format("Average conjugate gradient steps: {:.4g}\n", n_cg_step * 1. / n_call));
+        utils::logmesg(lmp, "Average conjugate gradient steps: {:.4g}\n", n_cg_step * 1. / n_call);
     } catch (std::exception &) {
     }
   }
-  if (!modify->get_fix_by_id(id))             // avoid segfault if derived fixes' ctor throws err
-    atom->delete_callback(id, Atom::GROW);    // atomvec track local electrode atoms
+
+  if (modify->get_fix_by_id(id)) atom->delete_callback(id, Atom::GROW);
+
+  delete[] recvcounts;
+  delete[] displs;
   if (matrix_algo) {
-    delete[] recvcounts;
-    delete[] displs;
     memory->destroy(iele_gathered);
     memory->destroy(buf_gathered);
     memory->destroy(potential_iele);
@@ -1235,11 +1222,9 @@ FixElectrodeConp::~FixElectrodeConp()
   memory->destroy(potential_i);
 
   delete elyt_vector;
+  memory->destroy(elastance);
+  memory->destroy(capacitance);
   if (need_elec_vector) delete elec_vector;
-  if (algo == Algo::MATRIX_INV)
-    memory->destroy(capacitance);
-  else if (matrix_algo)
-    memory->destroy(elastance);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1306,7 +1291,7 @@ void FixElectrodeConp::read_from_file(const std::string &input_file, double **ar
       }
     }
     if ((bigint) idx.size() != ngroup)
-      error->all(FLERR, fmt::format("Read tags do not match taglist of electrode/conp"));
+      error->all(FLERR, "Read tags do not match taglist of fix {}", style);
     for (bigint i = 0; i < ngroup; i++) {
       bigint const ii = idx[i];
       for (bigint j = 0; j < ngroup; j++) array[i][j] = matrix[ii][idx[j]];
@@ -1427,7 +1412,7 @@ void FixElectrodeConp::gather_list_iele()
     }
   }
   nlocalele = static_cast<int>(taglist_local.size());    // just for safety
-  assert(iele_to_group_local.size() == nlocalele);
+  assert((int) iele_to_group_local.size() == nlocalele);
 
   if (matrix_algo) {
     MPI_Allgather(&nlocalele, 1, MPI_INT, recvcounts, 1, MPI_INT, world);

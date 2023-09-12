@@ -1,8 +1,10 @@
+# -*- CMake -*- master configuration file for building LAMMPS
 ########################################
 # CMake build system
 # This file is part of LAMMPS
 # Created by Christoph Junghans and Richard Berger
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
+########################################
 # set policy to silence warnings about ignoring <PackageName>_ROOT but use it
 if(POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
@@ -10,11 +12,6 @@ endif()
 # set policy to silence warnings about ignoring  ${CMAKE_REQUIRED_LIBRARIES} but use it
 if(POLICY CMP0075)
   cmake_policy(SET CMP0075 NEW)
-endif()
-# set policy to silence warnings about missing executable permissions in
-# pythonx.y-config when cross-compiling. review occasionally if it may be set to NEW
-if(POLICY CMP0109)
-  cmake_policy(SET CMP0109 OLD)
 endif()
 # set policy to silence warnings about timestamps of downloaded files. review occasionally if it may be set to NEW
 if(POLICY CMP0135)
@@ -129,15 +126,15 @@ if((PKG_KOKKOS) AND (Kokkos_ENABLE_CUDA) AND NOT (CMAKE_CXX_COMPILER_ID STREQUAL
   set(CMAKE_TUNE_DEFAULT "${CMAKE_TUNE_DEFAULT} -Xcudafe --diag_suppress=unrecognized_pragma")
 endif()
 
-# we require C++11 without extensions. Kokkos requires at least C++14 (currently)
+# we require C++11 without extensions. Kokkos requires at least C++17 (currently)
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 11)
 endif()
 if(CMAKE_CXX_STANDARD LESS 11)
   message(FATAL_ERROR "C++ standard must be set to at least 11")
 endif()
-if(PKG_KOKKOS AND (CMAKE_CXX_STANDARD LESS 14))
-  set(CMAKE_CXX_STANDARD 14)
+if(PKG_KOKKOS AND (CMAKE_CXX_STANDARD LESS 17))
+  set(CMAKE_CXX_STANDARD 17)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF CACHE BOOL "Use compiler extensions")
@@ -148,6 +145,7 @@ if(MSVC)
     add_compile_options(/Zc:__cplusplus)
     add_compile_options(/wd4244)
     add_compile_options(/wd4267)
+    add_compile_options(/wd4250)
     add_compile_options(/EHsc)
   endif()
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
@@ -161,8 +159,8 @@ endif()
 ########################################################################
 # User input options                                                   #
 ########################################################################
-# set path to python interpreter and thus enforcing python version if
-# when in a virtual environment and PYTHON_EXECUTABLE is not set on command line
+# set path to python interpreter and thus enforcing python version when
+# in a virtual environment and PYTHON_EXECUTABLE is not set on command line
 if(DEFINED ENV{VIRTUAL_ENV} AND NOT PYTHON_EXECUTABLE)
   if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
     set(PYTHON_EXECUTABLE "$ENV{VIRTUAL_ENV}/Scripts/python.exe")
@@ -185,6 +183,7 @@ option(BUILD_SHARED_LIBS "Build shared library" OFF)
 option(CMAKE_POSITION_INDEPENDENT_CODE "Create object compatible with shared libraries" ON)
 option(BUILD_TOOLS "Build and install LAMMPS tools (msi2lmp, binary2txt, chain)" OFF)
 option(BUILD_LAMMPS_SHELL "Build and install the LAMMPS shell" OFF)
+option(BUILD_LAMMPS_GUI "Build and install the LAMMPS GUI" OFF)
 
 # Support using clang-tidy for C++ files with selected options
 set(ENABLE_CLANG_TIDY OFF CACHE BOOL "Include clang-tidy processing when compiling")
@@ -195,8 +194,8 @@ else()
 endif()
 
 include(GNUInstallDirs)
-file(GLOB ALL_SOURCES ${LAMMPS_SOURCE_DIR}/[^.]*.cpp)
-file(GLOB MAIN_SOURCES ${LAMMPS_SOURCE_DIR}/main.cpp)
+file(GLOB ALL_SOURCES CONFIGURE_DEPENDS ${LAMMPS_SOURCE_DIR}/[^.]*.cpp)
+file(GLOB MAIN_SOURCES CONFIGURE_DEPENDS ${LAMMPS_SOURCE_DIR}/main.cpp)
 list(REMOVE_ITEM ALL_SOURCES ${MAIN_SOURCES})
 add_library(lammps ${ALL_SOURCES})
 
@@ -251,7 +250,7 @@ set(STANDARD_PACKAGES
   KIM
   KSPACE
   LATBOLTZ
-  LATTE
+  LEPTON
   MACHDYN
   MANIFOLD
   MANYBODY
@@ -267,12 +266,10 @@ set(STANDARD_PACKAGES
   ML-QUIP
   ML-RANN
   ML-SNAP
-  ML-POD  
+  ML-POD
   MOFFF
   MOLECULE
   MOLFILE
-  MPIIO
-  MSCG
   NETCDF
   ORIENT
   PERI
@@ -378,15 +375,9 @@ if(NOT ${LAMMPS_MEMALIGN} STREQUAL "0")
   target_compile_definitions(lammps PRIVATE -DLAMMPS_MEMALIGN=${LAMMPS_MEMALIGN})
 endif()
 
-option(LAMMPS_EXCEPTIONS "enable the use of C++ exceptions for error messages (useful for library interface)" ${ENABLE_TESTING})
-if(LAMMPS_EXCEPTIONS)
-  target_compile_definitions(lammps PUBLIC -DLAMMPS_EXCEPTIONS)
-endif()
-
 # "hard" dependencies between packages resulting
 # in an error instead of skipping over files
 pkg_depends(ML-IAP ML-SNAP)
-pkg_depends(MPIIO MPI)
 pkg_depends(ATC MANYBODY)
 pkg_depends(LATBOLTZ MPI)
 pkg_depends(SCAFACOS MPI)
@@ -397,6 +388,7 @@ pkg_depends(CG-DNA MOLECULE)
 pkg_depends(CG-DNA ASPHERE)
 pkg_depends(ELECTRODE KSPACE)
 pkg_depends(EXTRA-MOLECULE MOLECULE)
+pkg_depends(MESONT MOLECULE)
 
 # detect if we may enable OpenMP support by default
 set(BUILD_OMP_DEFAULT OFF)
@@ -434,23 +426,19 @@ if(BUILD_OMP)
   target_link_libraries(lmp PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-if(PKG_MSCG OR PKG_ATC OR PKG_AWPMD OR PKG_ML-QUIP OR PKG_ML-POD OR PKG_LATTE OR PKG_ELECTRODE)
+if(PKG_ATC OR PKG_AWPMD OR PKG_ML-QUIP OR PKG_ML-POD OR PKG_ELECTRODE OR BUILD_TOOLS)
   enable_language(C)
   if (NOT USE_INTERNAL_LINALG)
     find_package(LAPACK)
     find_package(BLAS)
   endif()
   if(NOT LAPACK_FOUND OR NOT BLAS_FOUND OR USE_INTERNAL_LINALG)
-    include(CheckGeneratorSupport)
-    if(NOT CMAKE_GENERATOR_SUPPORT_FORTRAN)
-      status(FATAL_ERROR "Cannot build internal linear algebra library as CMake build tool lacks Fortran support")
-    endif()
-    enable_language(Fortran)
-    file(GLOB LAPACK_SOURCES ${LAMMPS_LIB_SOURCE_DIR}/linalg/[^.]*.[fF])
-    add_library(linalg STATIC ${LAPACK_SOURCES})
+    file(GLOB LINALG_SOURCES CONFIGURE_DEPENDS ${LAMMPS_LIB_SOURCE_DIR}/linalg/[^.]*.cpp)
+    add_library(linalg STATIC ${LINALG_SOURCES})
     set_target_properties(linalg PROPERTIES OUTPUT_NAME lammps_linalg${LAMMPS_MACHINE})
     set(BLAS_LIBRARIES "$<TARGET_FILE:linalg>")
     set(LAPACK_LIBRARIES "$<TARGET_FILE:linalg>")
+    target_link_libraries(lammps PRIVATE linalg)
   else()
     list(APPEND LAPACK_LIBRARIES ${BLAS_LIBRARIES})
   endif()
@@ -463,12 +451,7 @@ option(WITH_JPEG "Enable JPEG support" ${JPEG_FOUND})
 if(WITH_JPEG)
   find_package(JPEG REQUIRED)
   target_compile_definitions(lammps PRIVATE -DLAMMPS_JPEG)
-  if(CMAKE_VERSION VERSION_LESS 3.12)
-    target_include_directories(lammps PRIVATE ${JPEG_INCLUDE_DIRS})
-    target_link_libraries(lammps PRIVATE ${JPEG_LIBRARIES})
-  else()
-    target_link_libraries(lammps PRIVATE JPEG::JPEG)
-  endif()
+  target_link_libraries(lammps PRIVATE JPEG::JPEG)
 endif()
 
 find_package(PNG QUIET)
@@ -518,7 +501,7 @@ else()
 endif()
 
 foreach(PKG_WITH_INCL KSPACE PYTHON ML-IAP VORONOI COLVARS ML-HDNNP MDI MOLFILE NETCDF
-        PLUMED QMMM ML-QUIP SCAFACOS MACHDYN VTK KIM LATTE MSCG COMPRESS ML-PACE)
+        PLUMED QMMM ML-QUIP SCAFACOS MACHDYN VTK KIM COMPRESS ML-PACE LEPTON)
   if(PKG_${PKG_WITH_INCL})
     include(Packages/${PKG_WITH_INCL})
   endif()
@@ -535,7 +518,10 @@ set(CMAKE_TUNE_FLAGS "${CMAKE_TUNE_DEFAULT}" CACHE STRING "Compiler and machine 
 separate_arguments(CMAKE_TUNE_FLAGS)
 foreach(_FLAG ${CMAKE_TUNE_FLAGS})
   target_compile_options(lammps PRIVATE ${_FLAG})
-  target_compile_options(lmp PRIVATE ${_FLAG})
+  # skip these flags when linking the main executable
+  if(NOT (("${_FLAG}" STREQUAL "-Xcudafe") OR (("${_FLAG}" STREQUAL "--diag_suppress=unrecognized_pragma"))))
+    target_compile_options(lmp PRIVATE ${_FLAG})
+  endif()
 endforeach()
 ########################################################################
 # Basic system tests (standard libraries, headers, functions, types)   #
@@ -563,6 +549,8 @@ RegisterStyles(${LAMMPS_SOURCE_DIR})
 ########################################################
 # Fetch missing external files and archives for packages
 ########################################################
+option(DOWNLOAD_POTENTIALS "Automatically download large potential files" ON)
+mark_as_advanced(DOWNLOAD_POTENTIALS)
 foreach(PKG ${STANDARD_PACKAGES} ${SUFFIX_PACKAGES})
   if(PKG_${PKG})
     FetchPotentials(${LAMMPS_SOURCE_DIR}/${PKG} ${LAMMPS_POTENTIALS_DIR})
@@ -575,8 +563,8 @@ endforeach()
 foreach(PKG ${STANDARD_PACKAGES})
   set(${PKG}_SOURCES_DIR ${LAMMPS_SOURCE_DIR}/${PKG})
 
-  file(GLOB ${PKG}_SOURCES ${${PKG}_SOURCES_DIR}/[^.]*.cpp)
-  file(GLOB ${PKG}_HEADERS ${${PKG}_SOURCES_DIR}/[^.]*.h)
+  file(GLOB ${PKG}_SOURCES CONFIGURE_DEPENDS ${${PKG}_SOURCES_DIR}/[^.]*.cpp)
+  file(GLOB ${PKG}_HEADERS CONFIGURE_DEPENDS ${${PKG}_SOURCES_DIR}/[^.]*.h)
 
   # check for package files in src directory due to old make system
   DetectBuildSystemConflict(${LAMMPS_SOURCE_DIR} ${${PKG}_SOURCES} ${${PKG}_HEADERS})
@@ -592,19 +580,12 @@ foreach(PKG ${STANDARD_PACKAGES})
   RegisterPackages(${${PKG}_SOURCES_DIR})
 endforeach()
 
-# packages that need defines set
-foreach(PKG MPIIO)
-  if(PKG_${PKG})
-    target_compile_definitions(lammps PRIVATE -DLMP_${PKG})
-  endif()
-endforeach()
-
 # dedicated check for entire contents of accelerator packages
 foreach(PKG ${SUFFIX_PACKAGES})
   set(${PKG}_SOURCES_DIR ${LAMMPS_SOURCE_DIR}/${PKG})
 
-  file(GLOB ${PKG}_SOURCES ${${PKG}_SOURCES_DIR}/[^.]*.cpp)
-  file(GLOB ${PKG}_HEADERS ${${PKG}_SOURCES_DIR}/[^.]*.h)
+  file(GLOB ${PKG}_SOURCES CONFIGURE_DEPENDS ${${PKG}_SOURCES_DIR}/[^.]*.cpp)
+  file(GLOB ${PKG}_HEADERS CONFIGURE_DEPENDS ${${PKG}_SOURCES_DIR}/[^.]*.h)
 
   # check for package files in src directory due to old make system
   DetectBuildSystemConflict(${LAMMPS_SOURCE_DIR} ${${PKG}_SOURCES} ${${PKG}_HEADERS})
@@ -615,18 +596,11 @@ endforeach()
 ##############################################
 # add lib sources of (simple) enabled packages
 ############################################
-foreach(PKG_LIB POEMS ATC AWPMD H5MD MESONT)
+foreach(PKG_LIB POEMS ATC AWPMD H5MD)
   if(PKG_${PKG_LIB})
     string(TOLOWER "${PKG_LIB}" PKG_LIB)
-    if(PKG_LIB STREQUAL "mesont")
-      enable_language(Fortran)
-      file(GLOB_RECURSE ${PKG_LIB}_SOURCES
-        ${LAMMPS_LIB_SOURCE_DIR}/${PKG_LIB}/[^.]*.f90)
-    else()
-      file(GLOB_RECURSE ${PKG_LIB}_SOURCES
-        ${LAMMPS_LIB_SOURCE_DIR}/${PKG_LIB}/[^.]*.c
-        ${LAMMPS_LIB_SOURCE_DIR}/${PKG_LIB}/[^.]*.cpp)
-    endif()
+    file(GLOB_RECURSE ${PKG_LIB}_SOURCES CONFIGURE_DEPENDS
+      ${LAMMPS_LIB_SOURCE_DIR}/${PKG_LIB}/[^.]*.c ${LAMMPS_LIB_SOURCE_DIR}/${PKG_LIB}/[^.]*.cpp)
     add_library(${PKG_LIB} STATIC ${${PKG_LIB}_SOURCES})
     set_target_properties(${PKG_LIB} PROPERTIES OUTPUT_NAME lammps_${PKG_LIB}${LAMMPS_MACHINE})
     target_link_libraries(lammps PRIVATE ${PKG_LIB})
@@ -795,9 +769,11 @@ include(Tools)
 include(Documentation)
 
 ###############################################################################
-# Install potential and force field files in data directory
+# Install bench, potential and force field files in data directory
 ###############################################################################
-set(LAMMPS_INSTALL_DATADIR ${CMAKE_INSTALL_FULL_DATADIR}/lammps)
+set(LAMMPS_INSTALL_DATADIR ${CMAKE_INSTALL_DATADIR}/lammps)
+
+install(DIRECTORY ${LAMMPS_DIR}/bench DESTINATION ${LAMMPS_INSTALL_DATADIR})
 install(DIRECTORY ${LAMMPS_POTENTIALS_DIR} DESTINATION ${LAMMPS_INSTALL_DATADIR})
 if(BUILD_TOOLS)
   install(DIRECTORY ${LAMMPS_TOOLS_DIR}/msi2lmp/frc_files DESTINATION ${LAMMPS_INSTALL_DATADIR})
@@ -818,20 +794,11 @@ install(
 # This is primarily for people that only want to use the Python wrapper.
 ###############################################################################
 if(BUILD_SHARED_LIBS)
-  if(CMAKE_VERSION VERSION_LESS 3.12)
-    # adjust so we find Python 3 versions before Python 2 on old systems with old CMake
-    set(Python_ADDITIONAL_VERSIONS 3.12 3.11 3.10 3.9 3.8 3.7 3.6)
-    find_package(PythonInterp) # Deprecated since version 3.12
-    if(PYTHONINTERP_FOUND)
-      set(Python_EXECUTABLE ${PYTHON_EXECUTABLE})
-    endif()
-  else()
-    # backward compatibility
-    if(PYTHON_EXECUTABLE)
-      set(Python_EXECUTABLE ${PYTHON_EXECUTABLE})
-    endif()
-    find_package(Python COMPONENTS Interpreter)
+  # backward compatibility
+  if(PYTHON_EXECUTABLE)
+    set(Python_EXECUTABLE ${PYTHON_EXECUTABLE})
   endif()
+  find_package(Python COMPONENTS Interpreter)
   if(BUILD_IS_MULTI_CONFIG)
     set(MY_BUILD_DIR ${CMAKE_BINARY_DIR}/$<CONFIG>)
   else()
@@ -840,9 +807,8 @@ if(BUILD_SHARED_LIBS)
   set(LIBLAMMPS_SHARED_BINARY ${MY_BUILD_DIR}/liblammps${LAMMPS_MACHINE}${CMAKE_SHARED_LIBRARY_SUFFIX})
   if(Python_EXECUTABLE)
     add_custom_target(
-      install-python ${CMAKE_COMMAND} -E remove_directory build
-      COMMAND ${Python_EXECUTABLE} ${LAMMPS_PYTHON_DIR}/install.py -p ${LAMMPS_PYTHON_DIR}/lammps
-              -l ${LIBLAMMPS_SHARED_BINARY} -w ${MY_BUILD_DIR}
+      install-python ${Python_EXECUTABLE} ${LAMMPS_PYTHON_DIR}/install.py -p ${LAMMPS_PYTHON_DIR}/lammps
+      -l ${LIBLAMMPS_SHARED_BINARY} -w ${MY_BUILD_DIR} -v ${LAMMPS_SOURCE_DIR}/version.h
       COMMENT "Installing LAMMPS Python module")
   else()
     add_custom_target(
@@ -853,35 +819,6 @@ else()
   add_custom_target(
     install-python
     ${CMAKE_COMMAND} -E echo "Must build LAMMPS as a shared library to use the Python module")
-endif()
-
-###############################################################################
-# Add LAMMPS python module to "install" target. This is taylored for building
-# LAMMPS for package managers and with different prefix settings.
-# This requires either a shared library or that the PYTHON package is included.
-###############################################################################
-if(BUILD_SHARED_LIBS OR PKG_PYTHON)
-  if(CMAKE_VERSION VERSION_LESS 3.12)
-    # adjust so we find Python 3 versions before Python 2 on old systems with old CMake
-    set(Python_ADDITIONAL_VERSIONS 3.12 3.11 3.10 3.9 3.8 3.7 3.6)
-    find_package(PythonInterp) # Deprecated since version 3.12
-    if(PYTHONINTERP_FOUND)
-      set(Python_EXECUTABLE ${PYTHON_EXECUTABLE})
-    endif()
-  else()
-    # backward compatibility
-    if(PYTHON_EXECUTABLE)
-      set(Python_EXECUTABLE ${PYTHON_EXECUTABLE})
-    endif()
-    find_package(Python COMPONENTS Interpreter)
-  endif()
-  if(Python_EXECUTABLE)
-    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/python/lib)
-    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/python/src)
-    file(COPY ${LAMMPS_SOURCE_DIR}/version.h  DESTINATION ${CMAKE_BINARY_DIR}/python/src)
-    file(COPY ${LAMMPS_PYTHON_DIR}/README ${LAMMPS_PYTHON_DIR}/pyproject.toml ${LAMMPS_PYTHON_DIR}/setup.py ${LAMMPS_PYTHON_DIR}/lammps  DESTINATION ${CMAKE_BINARY_DIR}/python/lib)
-    install(CODE "if(\"\$ENV{DESTDIR}\" STREQUAL \"\")\n execute_process(COMMAND ${Python_EXECUTABLE} -m pip install -v ${CMAKE_BINARY_DIR}/python/lib --prefix=${CMAKE_INSTALL_PREFIX})\n else()\n execute_process(COMMAND ${Python_EXECUTABLE} -m pip install -v ${CMAKE_BINARY_DIR}/python/lib --prefix=${CMAKE_INSTALL_PREFIX} --root=\$ENV{DESTDIR})\n endif()")
-  endif()
 endif()
 
 include(Testing)
@@ -895,6 +832,23 @@ if(ClangFormat_FOUND)
     WORKING_DIRECTORY ${LAMMPS_SOURCE_DIR})
 endif()
 
+# extract Kokkos compilation settings
+get_cmake_property(_allvars VARIABLES)
+foreach(_var ${_allvars})
+  if(${_var})
+    string(REGEX MATCH "Kokkos_ENABLE_(SERIAL|THREADS|OPENMP|CUDA|HIP|SYCL|OPENMPTARGET|HPX)" _match ${_var})
+    if(_match)
+      string(REGEX REPLACE "Kokkos_ENABLE_(OPENMP|SERIAL|CUDA|HIP|SYCL)" "\\1" _match ${_var})
+      list(APPEND KOKKOS_DEVICE ${_match})
+    endif()
+    string(REGEX MATCH "Kokkos_ARCH" _match ${_var})
+    if(_match)
+      string(REGEX REPLACE "Kokkos_ARCH_(.*)" "\\1" _match ${_var})
+      list(APPEND KOKKOS_ARCH ${_match})
+    endif()
+  endif()
+endforeach()
+
 get_target_property(DEFINES lammps COMPILE_DEFINITIONS)
 if(BUILD_IS_MULTI_CONFIG)
   set(LAMMPS_BUILD_TYPE "Multi-Config")
@@ -903,12 +857,23 @@ else()
 endif()
 include(FeatureSummary)
 feature_summary(DESCRIPTION "The following tools and libraries have been found and configured:" WHAT PACKAGES_FOUND)
+if(GIT_FOUND AND EXISTS ${LAMMPS_DIR}/.git)
+  execute_process(COMMAND ${GIT_EXECUTABLE} describe --dirty=-modified --always
+    OUTPUT_VARIABLE GIT_DESCRIBE
+    ERROR_QUIET
+    WORKING_DIRECTORY ${LAMMPS_DIR}
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+endif()
 message(STATUS "<<< Build configuration >>>
-   LAMMPS Version:   ${PROJECT_VERSION}
+   LAMMPS Version:   ${PROJECT_VERSION} ${GIT_DESCRIBE}
    Operating System: ${CMAKE_SYSTEM_NAME} ${CMAKE_LINUX_DISTRO} ${CMAKE_DISTRO_VERSION}
+   CMake Version:    ${CMAKE_VERSION}
    Build type:       ${LAMMPS_BUILD_TYPE}
    Install path:     ${CMAKE_INSTALL_PREFIX}
    Generator:        ${CMAKE_GENERATOR} using ${CMAKE_MAKE_PROGRAM}")
+if(CMAKE_CROSSCOMPILING)
+  message(STATUS "Cross compiling on ${CMAKE_HOST_SYSTEM}")
+endif()
 ###############################################################################
 # Print package summary
 ###############################################################################
@@ -952,11 +917,9 @@ if(_index GREATER -1)
 endif()
 message(STATUS "<<< Linker flags: >>>")
 message(STATUS "Executable name:  ${LAMMPS_BINARY}")
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.13)
-  get_target_property(OPTIONS lammps LINK_OPTIONS)
-  if(OPTIONS)
-    message(STATUS "Linker options:   ${OPTIONS}")
-  endif()
+get_target_property(OPTIONS lammps LINK_OPTIONS)
+if(OPTIONS)
+  message(STATUS "Linker options:   ${OPTIONS}")
 endif()
 if(CMAKE_EXE_LINKER_FLAGS)
   message(STATUS "Executable linker flags: ${CMAKE_EXE_LINKER_FLAGS}")
@@ -990,6 +953,12 @@ if(PKG_GPU)
     endif()
   endif()
   message(STATUS "GPU precision:            ${GPU_PREC}")
+endif()
+if(PKG_KOKKOS)
+  message(STATUS "Kokkos Devices: ${KOKKOS_DEVICE}")
+  if(KOKKOS_ARCH)
+    message(STATUS "Kokkos Architecture: ${KOKKOS_ARCH}")
+  endif()
 endif()
 if(PKG_KSPACE)
   message(STATUS "<<< FFT settings >>>
@@ -1030,6 +999,14 @@ if(BUILD_TOOLS)
 endif()
 if(BUILD_LAMMPS_SHELL)
   message(STATUS "<<< Building LAMMPS Shell >>>")
+endif()
+if(BUILD_LAMMPS_GUI)
+  message(STATUS "<<< Building LAMMPS GUI >>>")
+  if(LAMMPS_GUI_USE_PLUGIN)
+    message(STATUS "Loading LAMMPS library as plugin at run time")
+  else()
+    message(STATUS "Linking LAMMPS library at compile time")
+  endif()
 endif()
 if(ENABLE_TESTING)
   message(STATUS "<<< Building Unit Tests >>>")

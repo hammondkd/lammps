@@ -56,7 +56,8 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
 #endif
   if (handle == NULL) return NULL;
 
-  lmp = (liblammpsplugin_t *) malloc(sizeof(liblammpsplugin_t));
+  lmp = (liblammpsplugin_t *) calloc(1, sizeof(liblammpsplugin_t));
+  lmp->abiversion = LAMMPSPLUGIN_ABI_VERSION;
   lmp->handle = handle;
 
 #ifdef _WIN32
@@ -89,6 +90,7 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
 
   ADDSYM(get_natoms);
   ADDSYM(get_thermo);
+  ADDSYM(last_thermo);
 
   ADDSYM(extract_box);
   ADDSYM(reset_box);
@@ -108,6 +110,7 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(extract_variable);
   ADDSYM(extract_variable_datatype);
   ADDSYM(set_variable);
+  ADDSYM(variable_info);
 
   ADDSYM(gather_atoms);
   ADDSYM(gather_atoms_concat);
@@ -116,6 +119,9 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(scatter_atoms_subset);
 
   ADDSYM(gather_bonds);
+  ADDSYM(gather_angles);
+  ADDSYM(gather_dihedrals);
+  ADDSYM(gather_impropers);
 
   ADDSYM(gather);
   ADDSYM(gather_concat);
@@ -179,15 +185,11 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(is_running);
   ADDSYM(force_timeout);
 
-#ifdef LAMMPS_EXCEPTIONS
-  lmp->has_exceptions = 1;
-  ADDSYM(has_error);
-  ADDSYM(get_last_error_message);
-#else
-  lmp->has_exceptions = 0;
-  lmp->has_error = NULL;
-  lmp->get_last_error_message = NULL;
-#endif
+  lmp->has_exceptions = lmp->config_has_exceptions();
+  if (lmp->has_exceptions) {
+    ADDSYM(has_error);
+    ADDSYM(get_last_error_message);
+  }
 
   ADDSYM(python_api_version);
   return lmp;
@@ -199,7 +201,7 @@ int liblammpsplugin_release(liblammpsplugin_t *lmp)
   if (lmp->handle == NULL) return 2;
 
 #ifdef _WIN32
-  FreeLibrary((HINSTANCE) handle);
+  FreeLibrary((HINSTANCE) lmp->handle);
 #else
   dlclose(lmp->handle);
 #endif

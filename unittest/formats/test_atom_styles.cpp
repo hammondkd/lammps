@@ -422,9 +422,6 @@ void ASSERT_ATOM_STATE_EQ(Atom *atom, const AtomState &expected)
     ASSERT_ARRAY_ALLOCATED(atom->edpd_temp, false);
     ASSERT_ARRAY_ALLOCATED(atom->edpd_flux, false);
     ASSERT_ARRAY_ALLOCATED(atom->edpd_cv, false);
-    ASSERT_ARRAY_ALLOCATED(atom->length, false);
-    ASSERT_ARRAY_ALLOCATED(atom->buckling, false);
-    ASSERT_ARRAY_ALLOCATED(atom->bond_nt, false);
     ASSERT_ARRAY_ALLOCATED(atom->contact_radius, false);
     ASSERT_ARRAY_ALLOCATED(atom->smd_data_9, false);
     ASSERT_ARRAY_ALLOCATED(atom->smd_stress, false);
@@ -536,7 +533,7 @@ TEST_F(AtomStyleTest, atomic)
     ASSERT_NE(lmp->atom->mass_setflag, nullptr);
     ASSERT_NE(lmp->atom->sametag, nullptr);
     ASSERT_EQ(lmp->atom->map_style, Atom::MAP_HASH);
-    ASSERT_EQ(lmp->atom->map_user, 2);
+    ASSERT_EQ(lmp->atom->map_user, Atom::MAP_HASH);
     ASSERT_EQ(lmp->atom->map_tag_max, 4);
     BEGIN_HIDE_OUTPUT();
     command("pair_coeff * *");
@@ -590,7 +587,7 @@ TEST_F(AtomStyleTest, atomic)
     ASSERT_EQ(lmp->atom->mass_setflag[1], 1);
     ASSERT_EQ(lmp->atom->mass_setflag[2], 1);
     ASSERT_EQ(lmp->atom->map_style, Atom::MAP_ARRAY);
-    ASSERT_EQ(lmp->atom->map_user, 1);
+    ASSERT_EQ(lmp->atom->map_user, Atom::MAP_ARRAY);
     ASSERT_EQ(lmp->atom->map_tag_max, 4);
     ASSERT_EQ(lmp->atom->tag_consecutive(), 1);
 
@@ -600,6 +597,7 @@ TEST_F(AtomStyleTest, atomic)
     command("delete_atoms group two compress no");
     command("write_restart test_atom_styles.restart");
     command("clear");
+    command("atom_modify map hash");
     command("read_restart test_atom_styles.restart");
     END_HIDE_OUTPUT();
     ASSERT_THAT(std::string(lmp->atom->atom_style), Eq("atomic"));
@@ -632,8 +630,8 @@ TEST_F(AtomStyleTest, atomic)
     EXPECT_NEAR(lmp->atom->mass[2], 2.4, EPSILON);
     ASSERT_EQ(lmp->atom->mass_setflag[1], 1);
     ASSERT_EQ(lmp->atom->mass_setflag[2], 1);
-    ASSERT_EQ(lmp->atom->map_style, Atom::MAP_ARRAY);
-    ASSERT_EQ(lmp->atom->map_user, 1);
+    ASSERT_EQ(lmp->atom->map_style, Atom::MAP_HASH);
+    ASSERT_EQ(lmp->atom->map_user, Atom::MAP_HASH);
     ASSERT_EQ(lmp->atom->map_tag_max, 3);
     BEGIN_HIDE_OUTPUT();
     command("reset_atom_ids");
@@ -4564,8 +4562,8 @@ TEST_F(AtomStyleTest, property_atom)
     expected.atom_style         = "atomic";
     expected.molecular          = Atom::ATOMIC;
     expected.tag_enable         = 1;
-    expected.map_style          = 1;
-    expected.map_user           = 1;
+    expected.map_style          = Atom::MAP_ARRAY;
+    expected.map_user           = Atom::MAP_ARRAY;
     expected.has_type           = true;
     expected.has_image          = true;
     expected.has_mask           = true;
@@ -4666,7 +4664,7 @@ TEST_F(AtomStyleTest, property_atom)
     ASSERT_NE(lmp->atom->sametag, nullptr);
     ASSERT_EQ(lmp->atom->tag_consecutive(), 1);
     ASSERT_EQ(lmp->atom->map_style, Atom::MAP_ARRAY);
-    ASSERT_EQ(lmp->atom->map_user, 1);
+    ASSERT_EQ(lmp->atom->map_user, Atom::MAP_ARRAY);
     ASSERT_EQ(lmp->atom->map_tag_max, 4);
 
     auto x = lmp->atom->x;
@@ -4754,6 +4752,7 @@ TEST_F(AtomStyleTest, property_atom)
     expected.has_ianame       = true;
     expected.has_daname       = true;
     expected.nextra_store     = 12;
+    expected.map_user         = Atom::MAP_NONE;
 
     ASSERT_ATOM_STATE_EQ(lmp->atom, expected);
     ASSERT_NE(lmp->atom->avec, nullptr);

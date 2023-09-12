@@ -1,4 +1,5 @@
 .. index:: fix viscous
+.. index:: fix viscous/kk
 
 fix viscous command
 ===================
@@ -8,7 +9,7 @@ Accelerator Variants: *viscous/kk*
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID viscous gamma keyword values ...
 
