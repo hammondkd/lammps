@@ -338,12 +338,6 @@ void FixQEq::setup_pre_force(int vflag)
   if (force->newton_pair == 0)
     error->all(FLERR,"QEQ with 'newton pair off' not supported");
 
-  if (force->pair) {
-    if (force->pair->suffix_flag & (Suffix::INTEL|Suffix::GPU))
-      error->all(FLERR,"QEQ is not compatiple with suffix version "
-                 "of pair style");
-  }
-
   deallocate_storage();
   allocate_storage();
 
@@ -810,8 +804,7 @@ void FixQEq::read_file(char *file)
 
     for (int n=1; n <= ntypes; ++n)
       if (setflag[n] == 0)
-        error->one(FLERR,fmt::format("Parameters for atom type {} missing in "
-                                     "qeq parameter file", n));
+        error->one(FLERR,"Parameters for atom type {} missing in qeq parameter file", n);
     delete[] setflag;
   }
 

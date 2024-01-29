@@ -481,7 +481,7 @@ void lammps_error(void *handle, int error_type, const char *error_text)
   }
   END_CAPTURE
 
-    // with enabled exceptions the above code will simply throw an
+    // in case of an error the above code will simply throw an
     // exception and record the error message. So we have to explicitly
     // stop here like we do in main.cpp
   if (lammps_has_error(handle)) {
@@ -617,7 +617,7 @@ combined by removing the '&' and the following newline character.  After
 this processing the string is handed to LAMMPS for parsing and
 executing.
 
-.. versionadded:: TBD
+.. versionadded:: 21Nov2023
 
    The command is now able to process long strings with triple quotes and
    loops using :doc:`jump SELF \<label\> <jump>`.
@@ -702,7 +702,14 @@ void lammps_commands_string(void *handle, const char *str)
             continue;
           }
         }
-        lmp->input->one(cmd.c_str());
+        // stop processing when quit command is found
+        if (words.size() && (words[0] == "quit")) {
+          if (lmp->comm->me == 0)
+            utils::logmesg(lmp, "Encountered a 'quit' command. Stopping ...\n");
+          break;
+        }
+
+        lmp->input->one(cmd);
       }
     }
   }
@@ -858,14 +865,17 @@ void *lammps_last_thermo(void *handle, const char *what, int index)
 {
   auto lmp = (LAMMPS *) handle;
   void *val = nullptr;
+
+  if (!lmp->output) return val;
   Thermo *th = lmp->output->thermo;
-  if (!th) return nullptr;
+  if (!th) return val;
   const int nfield = *th->get_nfield();
 
   BEGIN_CAPTURE
   {
     if (strcmp(what, "setup") == 0) {
-      val = (void *) &lmp->update->setupflag;
+      if (lmp->update)
+        val = (void *) &lmp->update->setupflag;
 
     } else if (strcmp(what, "line") == 0) {
       val = (void *) th->get_line();
@@ -1255,8 +1265,6 @@ internally by the :doc:`Fortran interface <Fortran>` and are not likely to be us
      - 1 if the atom style includes per-atom masses, 0 if there are per-type masses. See :doc:`atom_style`.
    * - radius_flag
      - 1 if the atom style includes a per-atom radius. See :doc:`atom_style`.
-   * - sphere_flag
-     - 1 if the atom style describes extended particles that can rotate. See :doc:`atom_style`.
    * - ellipsoid_flag
      - 1 if the atom style describes extended particles that may be ellipsoidal. See :doc:`atom_style`.
    * - omega_flag
@@ -1323,7 +1331,7 @@ int lammps_extract_setting(void *handle, const char *keyword)
   if (strcmp(keyword,"mu_flag") == 0) return lmp->atom->mu_flag;
   if (strcmp(keyword,"rmass_flag") == 0) return lmp->atom->rmass_flag;
   if (strcmp(keyword,"radius_flag") == 0) return lmp->atom->radius_flag;
-  if (strcmp(keyword,"sphere_flag") == 0) return lmp->atom->sphere_flag;
+
   if (strcmp(keyword,"ellipsoid_flag") == 0) return lmp->atom->ellipsoid_flag;
   if (strcmp(keyword,"omega_flag") == 0) return lmp->atom->omega_flag;
   if (strcmp(keyword,"torque_flag") == 0) return lmp->atom->torque_flag;
@@ -2441,19 +2449,69 @@ int lammps_extract_variable_datatype(void *handle, const char *name)
 }
 
 /* ---------------------------------------------------------------------- */
+// for printing obsolete function call warning only once
+static int set_variable_deprecated_flag = 1;
 
 /** Set the value of a string-style variable.
- *
- * This function assigns a new value from the string str to the
- * string-style variable name. Returns -1 if a variable of that
- * name does not exist or is not a string-style variable, otherwise 0.
- *
+\verbatim embed:rst
+
+.. deprecated:: TBD
+
+This function assigns a new value from the string str to the
+string-style variable *name*.  This is a way to directly change the
+string value of a LAMMPS variable that was previous defined with a
+:doc:`variable name string <variable>` command without using any
+LAMMPS commands to delete and redefine the variable.
+
+Returns -1 if a variable of that name does not exist or if it is not
+a string-style variable, otherwise 0.
+
+.. warning::
+
+   This function is deprecated and :cpp:func:`lammps_set_string_variable`
+   should be used instead.
+
+   \endverbatim
+
+* \param  handle  pointer to a previously created LAMMPS instance
+ * \param  name    name of the variable
+ * \param  str     new value of the variable
+ * \return         0 on success or -1 on failure */
+
+int lammps_set_variable(void *handle, const char *name, const char *str)
+{
+  if (set_variable_deprecated_flag) {
+    fprintf(stderr,"Using the 'lammps_set_variable()' function is deprecated. "
+            "Please use 'lammps_set_string_variable()' instead.\n");
+    set_variable_deprecated_flag = 0;
+  }
+  return lammps_set_string_variable(handle, name, str);
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Set the value of a string-style variable.
+\verbatim embed:rst
+
+.. versionadded:: TBD
+
+This function assigns a new value from the string str to the
+string-style variable *name*.  This is a way to directly change the
+string value of a LAMMPS variable that was previous defined with a
+:doc:`variable name string <variable>` command without using any
+LAMMPS commands to delete and redefine the variable.
+
+Returns -1 if a variable of that name does not exist or if it is not
+a string-style variable, otherwise 0.
+
+\endverbatim
+
  * \param  handle  pointer to a previously created LAMMPS instance
  * \param  name    name of the variable
  * \param  str     new value of the variable
  * \return         0 on success or -1 on failure
  */
-int lammps_set_variable(void *handle, char *name, char *str)
+int lammps_set_string_variable(void *handle, const char *name, const char *str)
 {
   auto lmp = (LAMMPS *) handle;
   int err = -1;
@@ -2467,6 +2525,44 @@ int lammps_set_variable(void *handle, char *name, char *str)
   return err;
 }
 
+/* ---------------------------------------------------------------------- */
+
+/** Set the value of an internal-style variable.
+ *
+\verbatim embed:rst
+
+This function assigns a new value from the floating point number *value*
+to the internal-style variable *name*.  This is a way to directly change
+the numerical value of such a LAMMPS variable that was previous defined
+with a :doc:`variable name internal <variable>` command without using
+any LAMMPS commands to delete and redefine the variable.
+
+Returns -1 if a variable of that name does not exist or is not an
+internal-style variable, otherwise 0.
+
+\endverbatim
+
+ * \param  handle  pointer to a previously created LAMMPS instance
+ * \param  name    name of the variable
+ * \param  value   new value of the variable
+ * \return         0 on success or -1 on failure
+ */
+int lammps_set_internal_variable(void *handle, const char *name, double value)
+{
+  auto lmp = (LAMMPS *) handle;
+
+  BEGIN_CAPTURE
+  {
+    int ivar = lmp->input->variable->find(name);
+    if (ivar < 0) return -1;
+    if (lmp->input->variable->internalstyle(ivar)) {
+        lmp->input->variable->internal_set(ivar, value);
+        return 0;
+    }
+  }
+  END_CAPTURE
+  return -1;
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -2474,7 +2570,7 @@ int lammps_set_variable(void *handle, char *name, char *str)
  *
 \verbatim embed:rst
 
-.. versionadded:: TBD
+.. versionadded:: 21Nov2023
 
 This function copies a string with human readable information about
 a defined variable: name, style, current value(s) into the provided
@@ -5571,7 +5667,7 @@ int lammps_config_has_ffmpeg_support() {
  *
 \verbatim embed:rst
 
-.. deprecated:: TBD
+.. deprecated:: 21Nov2023
 
    LAMMPS has now exceptions always enabled, so this function
    will now always return 1 and can be removed from applications
@@ -6598,13 +6694,6 @@ has thrown a :ref:`C++ exception <exceptions>`.
    instance, but instead would check the global error buffer of the
    library interface.
 
-.. note::
-
-   This function will always report "no error" when the LAMMPS library
-   has been compiled without ``-DLAMMPS_EXCEPTIONS``, which turns fatal
-   errors aborting LAMMPS into C++ exceptions. You can use the library
-   function :cpp:func:`lammps_config_has_exceptions` to check whether this is
-   the case.
 \endverbatim
  *
  * \param handle   pointer to a previously created LAMMPS instance cast to ``void *`` or NULL
@@ -6648,17 +6737,11 @@ the failing MPI ranks to send messages.
    instance, but instead would check the global error buffer of the
    library interface.
 
-   .. versionchanged: TBD
+   .. versionchanged: 21Nov2023
 
    The *buffer* pointer may be ``NULL``.  This will clear any error
    status without copying the error message.
 
-.. note::
-
-   This function will do nothing when the LAMMPS library has been
-   compiled without ``-DLAMMPS_EXCEPTIONS``, which turns errors aborting
-   LAMMPS into C++ exceptions.  You can use the library function
-   :cpp:func:`lammps_config_has_exceptions` to check whether this is the case.
 \endverbatim
  *
  * \param  handle    pointer to a previously created LAMMPS instance cast to ``void *`` or NULL.

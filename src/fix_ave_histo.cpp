@@ -35,7 +35,7 @@ enum { SCALAR, VECTOR, WINDOW };
 enum { DEFAULT, GLOBAL, PERATOM, LOCAL };
 enum { IGNORE, END, EXTRA };
 
-#define BIG 1.0e20
+static constexpr double BIG = 1.0e20;
 /* ---------------------------------------------------------------------- */
 
 FixAveHisto::FixAveHisto(LAMMPS *lmp, int narg, char **arg) :
@@ -164,7 +164,7 @@ FixAveHisto::FixAveHisto(LAMMPS *lmp, int narg, char **arg) :
   }
 
   // check input args for kind consistency
-  // all inputs must all be global, per-atom, or local
+  // inputs must all be all either global, per-atom, or local
 
   if (nevery <= 0)
     error->all(FLERR,"Illegal {} nevery value: {}", mycmd, nevery);

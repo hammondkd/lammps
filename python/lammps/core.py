@@ -282,6 +282,8 @@ class lammps(object):
     self.lib.lammps_config_accelerator.argtypes = [c_char_p, c_char_p, c_char_p]
 
     self.lib.lammps_set_variable.argtypes = [c_void_p, c_char_p, c_char_p]
+    self.lib.lammps_set_string_variable.argtypes = [c_void_p, c_char_p, c_char_p]
+    self.lib.lammps_set_internal_variable.argtypes = [c_void_p, c_char_p, c_double]
 
     self.lib.lammps_has_style.argtypes = [c_void_p, c_char_p, c_char_p]
 
@@ -379,8 +381,9 @@ class lammps(object):
           for i in range(narg):
             if type(cmdargs[i]) is str:
               cmdargs[i] = cmdargs[i].encode()
-          cargs = (c_char_p*narg)(*cmdargs)
-          self.lib.lammps_open.argtypes = [c_int, c_char_p*narg, MPI_Comm, c_void_p]
+          cargs = (c_char_p*(narg+1))(*cmdargs)
+          cargs[narg] = None
+          self.lib.lammps_open.argtypes = [c_int, c_char_p*(narg+1), MPI_Comm, c_void_p]
         else:
           self.lib.lammps_open.argtypes = [c_int, c_char_p, MPI_Comm, c_void_p]
 
@@ -399,8 +402,9 @@ class lammps(object):
           for i in range(narg):
             if type(cmdargs[i]) is str:
               cmdargs[i] = cmdargs[i].encode()
-          cargs = (c_char_p*narg)(*cmdargs)
-          self.lib.lammps_open_no_mpi.argtypes = [c_int, c_char_p*narg, c_void_p]
+          cargs = (c_char_p*(narg+1))(*cmdargs)
+          cargs[narg] = None
+          self.lib.lammps_open_no_mpi.argtypes = [c_int, c_char_p*(narg+1), c_void_p]
           self.lmp = c_void_p(self.lib.lammps_open_no_mpi(narg,cargs,None))
         else:
           self.lib.lammps_open_no_mpi.argtypes = [c_int, c_char_p, c_void_p]
@@ -1250,6 +1254,8 @@ class lammps(object):
   def set_variable(self,name,value):
     """Set a new value for a LAMMPS string style variable
 
+    .. deprecated:: TBD
+
     This is a wrapper around the :cpp:func:`lammps_set_variable`
     function of the C-library interface.
 
@@ -1266,6 +1272,52 @@ class lammps(object):
     else: return -1
     with ExceptionCheck(self):
       return self.lib.lammps_set_variable(self.lmp,name,value)
+
+  # -------------------------------------------------------------------------
+
+  def set_string_variable(self,name,value):
+    """Set a new value for a LAMMPS string style variable
+
+    .. versionadded:: TBD
+
+    This is a wrapper around the :cpp:func:`lammps_set_string_variable`
+    function of the C-library interface.
+
+    :param name: name of the variable
+    :type name: string
+    :param value: new variable value
+    :type value: any. will be converted to a string
+    :return: either 0 on success or -1 on failure
+    :rtype: int
+    """
+    if name: name = name.encode()
+    else: return -1
+    if value: value = str(value).encode()
+    else: return -1
+    with ExceptionCheck(self):
+      return self.lib.lammps_set_string_variable(self.lmp,name,value)
+
+  # -------------------------------------------------------------------------
+
+  def set_internal_variable(self,name,value):
+    """Set a new value for a LAMMPS internal style variable
+
+    .. versionadded:: TBD
+
+    This is a wrapper around the :cpp:func:`lammps_set_internal_variable`
+    function of the C-library interface.
+
+    :param name: name of the variable
+    :type name: string
+    :param value: new variable value
+    :type value: float or compatible. will be converted to float
+    :return: either 0 on success or -1 on failure
+    :rtype: int
+    """
+    if name: name = name.encode()
+    else: return -1
+    with ExceptionCheck(self):
+      return self.lib.lammps_set_internal_variable(self.lmp,name,value)
 
   # -------------------------------------------------------------------------
 
